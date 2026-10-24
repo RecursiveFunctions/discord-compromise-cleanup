@@ -91,16 +91,26 @@ def is_compromise_event(my_id, ev) -> bool:
 
 # ---------- API ----------
 
-class Cleanup:
-    """Core engine. One instance per run. Thread-safe-ish via a progress queue."""
+class StopRequested(Exception):
+    """Raised to unwind the engine when the user clicks Stop."""
 
-    def __init__(self, token, min_sf, max_sf, pace=2.5, go=False, progress=None):
+
+class Cleanup:
+    """Core engine. One instance per run. Thread-safe-ish via a progress queue.
+
+    Pass `stop_event` (threading.Event) to allow cooperative cancellation.
+    The engine checks it at every API call and pacing sleep; when set, it
+    raises StopRequested so the worker thread unwinds cleanly."""
+
+    def __init__(self, token, min_sf, max_sf, pace=2.5, go=False,
+                 progress=None, stop_event=None):
         self.token = token
         self.min_sf = min_sf
         self.max_sf = max_sf
         self.pace = pace
         self.go = go
         self.progress = progress or (lambda *a, **k: None)
+        self.stop_event = stop_event
         self.audit = []
         self.aborted = False
 
@@ -110,13 +120,32 @@ class Cleanup:
     def phase(self, name, pct):
         self.progress(("phase", name, pct))
 
+    def _stopping(self):
+        return self.stop_event is not None and self.stop_event.is_set()
+
+    def _check_stop(self):
+        if self._stopping():
+            raise StopRequested()
+
+    def _interruptible_sleep(self, seconds):
+        """Sleep in 0.25s slices so a Stop fires fast even during long backoffs."""
+        step = 0.25
+        remaining = seconds
+        while remaining > 0:
+            if self._stopping():
+                raise StopRequested()
+            time.sleep(min(step, remaining))
+            remaining -= step
+
     def _sleep(self):
-        time.sleep(self.pace + random.random())
+        self._interruptible_sleep(self.pace + random.random())
 
     def api(self, method, path, data=None, retries=6):
+        self._check_stop()
         headers = {"Authorization": self.token, "User-Agent": UA,
                    "Content-Type": "application/json"}
         for attempt in range(retries):
+            self._check_stop()
             req = urllib.request.Request(API + path, method=method, headers=headers)
             if data is not None:
                 req.data = json.dumps(data).encode()
@@ -134,16 +163,16 @@ class Cleanup:
                     except Exception:
                         wait = float(e.headers.get("Retry-After", "3"))
                     self.log(f"  (rate-limited, waiting {wait+1:.1f}s)")
-                    time.sleep(wait + 1)
+                    self._interruptible_sleep(wait + 1)
                     continue
                 if e.code in (403, 404):
                     return e.code, None
                 if e.code >= 500:
-                    time.sleep(2 ** attempt)
+                    self._interruptible_sleep(2 ** attempt)
                     continue
                 return e.code, None
             except (TimeoutError, urllib.error.URLError):
-                time.sleep(3)
+                self._interruptible_sleep(3)
                 continue
         return None, None
 
@@ -610,6 +639,8 @@ def launch_gui():
     scan_btn.pack(side="left")
     exec_btn = ttk.Button(aframe, text="Delete (execute)")
     exec_btn.pack(side="left", padx=(8, 0))
+    stop_btn = ttk.Button(aframe, text="Stop", state="disabled")
+    stop_btn.pack(side="left", padx=(8, 0))
 
     # ---- log + progress ----
     pbar = ttk.Progressbar(main, mode="determinate", maximum=100)
@@ -621,6 +652,12 @@ def launch_gui():
     log.configure(state="disabled")
 
     msg_queue = queue.Queue()
+    stop_event = threading.Event()
+
+    def set_buttons(idle: bool):
+        scan_btn["state"] = "normal" if idle else "disabled"
+        exec_btn["state"] = "normal" if idle else "disabled"
+        stop_btn["state"] = "disabled" if idle else "normal"
 
     def dispatch_queue():
         try:
@@ -636,13 +673,12 @@ def launch_gui():
                     status_var.set(f"{evt[1]}…")
                     pbar["value"] = evt[2]
                 elif tag == "done":
-                    scan_btn["state"] = "normal"
-                    exec_btn["state"] = "normal"
+                    set_buttons(idle=True)
                     status_var.set(evt[1])
-                    pbar["value"] = 100
+                    if "Stopped" not in evt[1]:
+                        pbar["value"] = 100
                 elif tag == "error":
-                    scan_btn["state"] = "normal"
-                    exec_btn["state"] = "normal"
+                    set_buttons(idle=True)
                     status_var.set("Error.")
                     messagebox.showerror("Error", evt[1])
         except queue.Empty:
@@ -690,17 +726,18 @@ def launch_gui():
                 return
         log.configure(state="normal"); log.delete("1.0", "end")
         log.configure(state="disabled")
-        scan_btn["state"] = "disabled"
-        exec_btn["state"] = "disabled"
+        set_buttons(idle=False)
         pbar["value"] = 0
+        stop_event.clear()
 
         def progress_cb(evt):
             msg_queue.put(evt)
 
         def worker():
+            engine = None
             try:
                 engine = Cleanup(token, min_sf, max_sf, pace=pace, go=go,
-                                 progress=progress_cb)
+                                 progress=progress_cb, stop_event=stop_event)
                 totals = engine.run(phases)
                 summary = "  ".join(f"{k}={v}" for k, v in totals.items())
                 if go and engine.audit:
@@ -709,6 +746,12 @@ def launch_gui():
                     msg_queue.put(("log", f"Audit log saved to {auditp}"))
                 mode = "DELETED" if go else "DRY-RUN"
                 msg_queue.put(("done", f"{mode} complete. {summary}"))
+            except StopRequested:
+                if engine and go and engine.audit:
+                    auditp = Path.cwd() / "discord-cleanup-audit.json"
+                    auditp.write_text(json.dumps(engine.audit, indent=2))
+                    msg_queue.put(("log", f"Partial audit log saved to {auditp}"))
+                msg_queue.put(("done", "Stopped by user."))
             except SystemExit:
                 msg_queue.put(("done",
                                "Discord revoked the token. Stop, grab a new "
@@ -718,8 +761,15 @@ def launch_gui():
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def on_stop():
+        stop_event.set()
+        stop_btn["state"] = "disabled"
+        msg_queue.put(("log", "Stop requested — finishing the current API "
+                               "call then unwinding."))
+
     scan_btn.configure(command=lambda: run_in_thread(False))
     exec_btn.configure(command=lambda: run_in_thread(True))
+    stop_btn.configure(command=on_stop)
 
     dispatch_queue()
     root.mainloop()
