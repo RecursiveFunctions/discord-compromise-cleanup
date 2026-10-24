@@ -4,7 +4,7 @@
 You (or someone you know) got their discord account hacked. The bot sent spam, made phishing events, blocked
 your friends, hid their messages. This will reverse what the bot did.
 
-it's a single Python file ( GUI + CLI ) that works on windows/Linux/Mac. 
+Works on windows/Linux/Mac. 
 
 ## ⚠ Terms of service warning
 
@@ -149,8 +149,3 @@ Your real events (D&D night, movie watch) stay.
 ## License
 
 MIT. Use at your own risk; see the ToS warning.
-
-## Contributing
-
-PRs welcome, especially: new attack signatures, a prebuilt Windows
-`.exe` via PyInstaller, GitHub Actions release pipeline.
