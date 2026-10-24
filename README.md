@@ -62,19 +62,42 @@ No Python install needed. Downloads are ~10 MB (self-contained).
 
 <details>
 <summary><b>Run from source</b> (requires Python 3.9+, use this if the
-binary doesn't work for your OS)</summary>
+binary doesn't work for your OS or you want to read / modify the code)</summary>
 
-**Windows / macOS:** install [Python](https://www.python.org/downloads/).
-On Windows check "Add to PATH". Download `discord-compromise-cleanup.py`
-from this repo, double-click.
+**Step 1 — get the code.** Either clone the repo (needs Git):
 
-**Linux:** `sudo apt install python3 python3-tk`.
-Then `python3 discord-compromise-cleanup.py`.
+```bash
+git clone https://github.com/RecursiveFunctions/discord-compromise-cleanup.git
+cd discord-compromise-cleanup
+```
+
+Or, if you don't have Git, [download the ZIP](https://github.com/RecursiveFunctions/discord-compromise-cleanup/archive/refs/heads/master.zip)
+and unzip it. All you actually need from the repo is the single file
+`discord-compromise-cleanup.py` — you can also just save that file
+directly from
+[its raw view](https://raw.githubusercontent.com/RecursiveFunctions/discord-compromise-cleanup/master/discord-compromise-cleanup.py)
+(right-click → Save As).
+
+**Step 2 — make sure Python 3.9+ is installed.**
+
+- **Windows / macOS:** [python.org/downloads](https://www.python.org/downloads/).
+  On Windows, check **"Add python.exe to PATH"** during install.
+- **Linux:** `sudo apt install python3 python3-tk`
+  (or your distro's equivalent).
+
+**Step 3 — launch.**
+
+- Double-click `discord-compromise-cleanup.py` (Windows / macOS /
+  Linux file managers all support this).
+- Or from a terminal: `python3 discord-compromise-cleanup.py`.
 
 **CLI mode (scripters):**
+
 ```bash
 python3 discord-compromise-cleanup.py --cli --token-file ~/.discord-token --go
 ```
+
+Pass `--help` for all flags.
 </details>
 
 ## What a compromise looks like
@@ -116,6 +139,10 @@ Variants also seen in the wild: text messages with `discord.gift/`,
 4. **Scan (dry run)** — lists what would be deleted, deletes nothing.
 5. **Delete (execute)** — confirms, then runs. Writes
    `discord-cleanup-audit.json` next to the script.
+6. **Stop** — enabled while a scan or delete is running. Click any time
+   to cancel: the engine finishes the current API call (max 1-2 s),
+   writes a partial audit log if it was deleting, and the GUI returns
+   to idle. Safe to use mid-run; nothing is left in a half-done state.
 
 ## What it looks for
 
