@@ -1,17 +1,17 @@
+
 # Discord Compromise Cleanup
 
-Your Discord got hacked. The bot sent spam, made phishing events, blocked
-your friends, hid their messages. This reverses what it did, inside a time
-window.
+You (or someone you know) got their discord account hacked. The bot sent spam, made phishing events, blocked
+your friends, hid their messages. This will reverse what the bot did.
 
-Single Python file. GUI + CLI. No pip install. Windows, macOS, Linux.
+it's a single Python file ( GUI + CLI ) that works on windows/Linux/Mac. 
 
 ## ⚠ Terms of service warning
 
 Using a user token to automate Discord actions violates [Discord's
 ToS](https://discord.com/terms) (section 3). Your account can be banned.
 The script paces slow (2.5 s/call) to minimize detection but can't
-eliminate it. For a small attack (handful of DMs), delete manually.
+eliminate it. unlikely here but worth mentioning.
 
 ## Pre-flight
 
@@ -47,7 +47,7 @@ copying your own token.
 **Never paste your token into a chat, screenshot, or anywhere you don't
 control.**
 
-## Run it
+## How to run
 
 **Windows:** install [Python 3.9+](https://www.python.org/downloads/),
 check "Add to PATH" during install. Download the `.py` file,
@@ -66,22 +66,21 @@ python3 discord-compromise-cleanup.py --cli --token-file ~/.discord-token --go
 
 ## What a compromise looks like
 
-### Scheduled events the bot creates in your servers
+### Scheduled events
 
 ![example compromise event](docs/examples/example-scheduled-event.jpg)
 
 Pattern: your account creates an event with a lure name (`FREE NSFW`,
 `FREE NITRO`, airdrop) linking to a `discord.gg/` invite the attacker
-controls. Server members get notified, think it's from you.
+controls. Server members get notified, think it's from you, (and now they think you're a gooner)
 
-### DM spam the bot sends to your friends
+### DM spam
 
 Pattern: a short message with 4 image attachments and content that's
 either empty or just a bare `<@mention>` of the recipient. The
 attachments are the lure (fake Nitro gift, fake crypto airdrop, QR
 code to a phishing site). The bot DMs every friend plus people in
-your contacts list; most of them see this and message you asking "did
-you get hacked?".
+your contacts list
 
 Variants also seen in the wild: text messages with `discord.gift/`,
 `dsc.gg/`, nitro gift URLs, `free robux`, `@everyone`, `@here`.
@@ -105,7 +104,7 @@ Variants also seen in the wild: text messages with `discord.gift/`,
 5. **Delete (execute)** — confirms, then runs. Writes
    `discord-cleanup-audit.json` next to the script.
 
-## What it looks for, exactly
+## What it looks for
 
 **Messages — delete if either:**
 - 1+ attachment AND content is empty or just `<@id>`, OR
@@ -124,7 +123,7 @@ legit invites). If the attacker shared a server invite, delete manually.
 
 Your real events (D&D night, movie watch) stay.
 
-**Relationships — all cleared:**
+**Relationships:**
 - All blocks removed
 - All outgoing friend requests cancelled
 - All friend-ignores cleared
