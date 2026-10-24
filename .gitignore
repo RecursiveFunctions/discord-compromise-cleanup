@@ -1,0 +1,17 @@
+# Audit logs (local only — may contain information about users / channels)
+discord-cleanup-audit.json
+*-audit.json
+
+# Token files (never commit these; always 0600)
+.discord-token
+discord-token.txt
+*.token
+
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller artifacts (if someone runs it to build an exe)
+build/
+dist/
+*.spec
