@@ -1,0 +1,108 @@
+name: Build and release binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: discord-compromise-cleanup-windows.exe
+            pyinstaller_name: discord-compromise-cleanup-windows
+            built_file: dist/discord-compromise-cleanup-windows.exe
+          - os: macos-latest
+            artifact_name: discord-compromise-cleanup-macos
+            pyinstaller_name: discord-compromise-cleanup-macos
+            built_file: dist/discord-compromise-cleanup-macos
+          - os: ubuntu-latest
+            artifact_name: discord-compromise-cleanup-linux
+            pyinstaller_name: discord-compromise-cleanup-linux
+            built_file: dist/discord-compromise-cleanup-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Tkinter dev headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: pyinstaller --onefile --windowed --name ${{ matrix.pyinstaller_name }} discord-compromise-cleanup.py
+
+      - name: Build (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: pyinstaller --onefile --windowed --name ${{ matrix.pyinstaller_name }} discord-compromise-cleanup.py
+
+      - name: Mark Linux binary executable
+        if: runner.os == 'Linux'
+        run: chmod +x ${{ matrix.built_file }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.built_file }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            Prebuilt binaries for the Discord Compromise Cleanup tool.
+
+            **Pick the file matching your operating system:**
+            - `discord-compromise-cleanup-windows.exe` — Windows
+            - `discord-compromise-cleanup-macos` — macOS (right-click → Open the first time to bypass Gatekeeper)
+            - `discord-compromise-cleanup-linux` — Linux (`chmod +x` first time)
+
+            **Pre-flight before you run it** (do these in Discord manually):
+            1. Change your Discord password
+            2. Enable 2FA
+            3. User Settings → Authorized Apps → revoke anything you don't recognize
+            4. User Settings → Devices → "Log Out All Known Devices"
+
+            Then launch the binary and follow the GUI.
+
+            ⚠ Automating Discord actions via a user token violates Discord's
+            Terms of Service and may get your account banned. Use at your own
+            risk. For a small attack (handful of DMs), delete manually.

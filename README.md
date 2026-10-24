@@ -49,20 +49,33 @@ control.**
 
 ## How to run
 
-**Windows:** install [Python 3.9+](https://www.python.org/downloads/),
-check "Add to PATH" during install. Download the `.py` file,
-double-click.
+**Easiest — download the prebuilt binary** from the
+[latest release](https://github.com/RecursiveFunctions/discord-compromise-cleanup/releases/latest):
 
-**macOS:** install [Python 3.9+](https://www.python.org/downloads/).
-Right-click `.py` → Open With → Python Launcher.
+- **Windows** → `discord-compromise-cleanup-windows.exe` → double-click
+- **macOS** → `discord-compromise-cleanup-macos` → right-click → Open
+  the first time (bypasses Gatekeeper)
+- **Linux** → `discord-compromise-cleanup-linux` → `chmod +x` then
+  double-click or run from terminal
 
-**Linux:** `sudo apt install python3 python3-tk` (most desktops already
-have it). Then `python3 discord-compromise-cleanup.py`.
+No Python install needed. Downloads are ~10 MB (self-contained).
+
+<details>
+<summary><b>Run from source</b> (requires Python 3.9+, use this if the
+binary doesn't work for your OS)</summary>
+
+**Windows / macOS:** install [Python](https://www.python.org/downloads/).
+On Windows check "Add to PATH". Download `discord-compromise-cleanup.py`
+from this repo, double-click.
+
+**Linux:** `sudo apt install python3 python3-tk`.
+Then `python3 discord-compromise-cleanup.py`.
 
 **CLI mode (scripters):**
 ```bash
 python3 discord-compromise-cleanup.py --cli --token-file ~/.discord-token --go
 ```
+</details>
 
 ## What a compromise looks like
 
