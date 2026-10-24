@@ -18,45 +18,95 @@ eliminate it. unlikely here but worth mentioning.
 Do these before running. If you skip them, the attacker's session is
 still live and anything you clean up gets re-spammed.
 
-1. **Change your password** (User Settings → My Account).
-2. **Enable 2FA** (same page). Save backup codes offline.
-3. **Revoke Authorized Apps** (User Settings → Authorized Apps) —
-   these keep working after a password change.
-4. **Log out all devices** (User Settings → Devices → "Log Out All
-   Known Devices"). The script can't do this for you.
+| step | Discord Desktop / Web | Discord Mobile (iOS / Android) |
+|---|---|---|
+| **1. Change your password** | User Settings → My Account → Edit → Password | Settings (gear ⚙ bottom-right) → My Account → Password |
+| **2. Enable 2FA** | My Account → "Enable Two-Factor Auth" | My Account → "Enable Two-Factor Auth" |
+| **3. Revoke Authorized Apps** — these keep working after a password change | User Settings → Authorized Apps | Settings → Authorized Apps (scroll down the settings list) |
+| **4. Log out all devices** | User Settings → Devices → "Log Out All Known Devices" | Settings → Devices → "Log Out All Known Devices" |
+
+Save your 2FA backup codes somewhere offline (notes app, paper). You
+can't do step 4 from the cleanup tool; it needs your password.
 
 ## Get your Discord token
 
-**Use the Discord web app at [discord.com/app](https://discord.com/app).**
-The desktop client disables DevTools.
+**You need [discord.com/app](https://discord.com/app) in a browser.**
+The Discord desktop app disables DevTools and the mobile app has no
+way to export tokens. All three options below work in a browser.
 
-**Option A — Chrome extension (easiest):** Install [Discord Token
+### Option A — Chrome extension (desktop, easiest)
+
+Install [Discord Token
 Checker](https://chromewebstore.google.com/detail/discord-token-checker/lgdoombkkahcmffklnieoakenhakmjmk),
 log into Discord in Chrome, click the extension icon, copy the token.
 Uninstall the extension when done.
 
-**Option B — DevTools (no install):**
+### Option B — DevTools (desktop, no install)
+
 1. Log into `discord.com/app` with your new password.
-2. `Ctrl+Shift+I` → **Network** tab → filter `/api`.
-3. Click any channel. Click any `/api/v9/…` request in Network.
+2. `Ctrl+Shift+I` (`Cmd+Opt+I` on macOS) → **Network** tab → filter `/api`.
+3. Click any channel in Discord. Click any `/api/v9/…` request in Network.
 4. Request Headers → copy the `Authorization:` value.
 
-Ignore Discord's red "STOP!" warning — that's for scam victims, you're
-copying your own token.
+### Option C — Phone only (bookmarklet)
 
-**Never paste your token into a chat, screenshot, or anywhere you don't
-control.**
+If you only have a phone, you can still do this through the mobile browser:
+
+1. Open your browser (**Safari on iOS**, **Chrome on Android**).
+2. Go to [discord.com/app](https://discord.com/app).
+   - On iOS: tap the `aA` button in the address bar → "Request
+     Desktop Website".
+   - On Android: tap the ⋮ menu → check "Desktop site".
+3. Log in with your new password.
+4. **Save this as a bookmark** (any URL, e.g. `https://example.com`):
+
+   <details>
+   <summary>Click to show the bookmarklet JavaScript (long)</summary>
+
+   ```
+   javascript:(function(){try{var i=document.createElement('iframe');document.body.appendChild(i);var r=i.contentWindow.webpackChunkdiscord_app.push([[Symbol()],{},function(x){return x;}]);var t=null;for(var k in r.c){var m=r.c[k];if(m&&m.exports){var e=m.exports.default||m.exports;if(e&&typeof e.getToken==='function'){t=e.getToken();break}}}document.body.removeChild(i);if(!t){alert('Token not found. Discord may have updated. Borrow a desktop/laptop.');return}navigator.clipboard.writeText(t).then(function(){alert('Token copied to clipboard. Paste it into the cleanup tool.')},function(){prompt('Clipboard denied. Copy the token below:',t)})}catch(e){alert('Error: '+e.message)}})();
+   ```
+   </details>
+
+   Edit the saved bookmark → replace its URL with the whole
+   `javascript:…` block above. Name it something like **"Get Discord
+   token"**.
+5. In the **same browser tab** where you're logged into Discord,
+   tap the address bar, start typing the bookmark name, tap it.
+   An alert says "Token copied to clipboard". If it doesn't,
+   Discord changed something — fall back to a desktop/laptop.
+
+Then open the cleanup tool and paste.
+
+### Common to all three options
+
+- Ignore Discord's red "STOP!" warning in DevTools — that message is
+  for people being scammed, you're copying your own token.
+- **Never paste your token into a chat, screenshot, or anywhere you
+  don't control.** The token is a long-lived credential; anyone with
+  it can read everything your account can see.
 
 ## How to run
 
 **Easiest — download the prebuilt binary** from the
-[latest release](https://github.com/RecursiveFunctions/discord-compromise-cleanup/releases/latest):
+[latest release](https://github.com/RecursiveFunctions/discord-compromise-cleanup/releases/latest).
 
-- **Windows** → `discord-compromise-cleanup-windows.exe` → double-click
-- **macOS** → `discord-compromise-cleanup-macos` → right-click → Open
-  the first time (bypasses Gatekeeper)
-- **Linux** → `discord-compromise-cleanup-linux` → `chmod +x` then
-  double-click or run from terminal
+Pick the one matching your OS, then:
+
+- **Windows** → `discord-compromise-cleanup-windows.exe`, double-click.
+  Windows will show **"Windows protected your PC"** because the binary
+  isn't signed by a $300/yr Microsoft code-signing cert. Click
+  **"More info"** at the top of that dialog, then **"Run anyway"** at
+  the bottom. The file is open source — you can read every line in
+  this repo.
+- **macOS** → `discord-compromise-cleanup-macos`. The first time:
+  **right-click the file → Open** (not double-click), then click
+  **"Open"** on the "unverified developer" dialog. Same reason as
+  Windows — not code-signed. Second time onward, double-click works.
+- **Linux** → `discord-compromise-cleanup-linux`. In a terminal:
+  `chmod +x discord-compromise-cleanup-linux && ./discord-compromise-cleanup-linux`.
+  Or set executable in your file manager (right-click → Properties →
+  Permissions → "Allow executing") and double-click.
 
 No Python install needed. Downloads are ~10 MB (self-contained).
 
@@ -133,7 +183,13 @@ Variants also seen in the wild: text messages with `discord.gift/`,
 ![](docs/examples/gui-screenshot.png)
 
 1. Paste token (masked) or load from file.
-2. Set the compromise window in UTC. Default = last 24 h.
+2. Set the compromise window in UTC. **Default = last 24 h is fine for
+   most people** — don't touch it unless you need to.
+   If you need custom bounds and don't know what UTC is, open
+   [timeanddate.com/worldclock/converter.html](https://www.timeanddate.com/worldclock/converter.html),
+   convert the start and end moments from your local time to UTC, and
+   paste those into the fields. Example: 11:30 PM Eastern on Oct 22 =
+   `2026-10-23 03:30` in UTC (Eastern is 4 hours behind UTC).
 3. Pick phases: DMs, group DMs, group departures (report-only), server
    events, server messages, relationships.
 4. **Scan (dry run)** — lists what would be deleted, deletes nothing.
@@ -169,6 +225,35 @@ Your real events (D&D night, movie watch) stay.
 - All friend-ignores cleared
 - `DELETE /users/@me/relationships/{uid}/ignore` on every DM recipient
   (covers non-friend DM-level ignore, which no REST endpoint surfaces)
+
+## Troubleshooting
+
+**"I still see 'Ignored message' badges on my DMs after running it."**
+Discord's mobile and desktop apps cache the ignore state locally and
+don't refresh it until the WebSocket reconnects. **Fully quit and reopen
+the app** (not just background it — kill it from the recent apps list on
+mobile, or File → Quit on desktop). The badges clear on the fresh
+connection.
+
+**"The GUI opens but nothing happens when I click Scan."** The button
+is disabled while fields are invalid. Check that the token field has a
+value, the window has start < end in `YYYY-MM-DD HH:MM` format, and at
+least one phase checkbox is ticked.
+
+**"Discord revoked my token mid-run."** Discord's anti-automation
+system saw too many API calls too fast. Grab a fresh token (your
+account is fine, just that session is invalid), raise the pacing in the
+GUI from 2.5 → 4.0 seconds per call, and re-run. The partial audit log
+tells you what was already done so you don't repeat work.
+
+**"The mobile bookmarklet alert says 'Token not found'."** Discord
+updates their internal module layout a few times a year, which can
+break the bookmarklet. Workaround: borrow a laptop or desktop for 10
+minutes and use the DevTools or Chrome extension method.
+
+**"PyInstaller binary won't launch on an older OS."** The binaries are
+built on current Windows 10, macOS 14, and Ubuntu 22.04. If your OS is
+older, use the "Run from source" path with your system's Python.
 
 ## What it does NOT do
 
