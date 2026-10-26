@@ -20,11 +20,15 @@ Only you can decide whether the risk is worth it for compromise recovery.
 """
 
 import argparse
+import base64
 import json
 import os
 import queue
 import random
 import re
+import socket
+import ssl
+import struct
 import sys
 import threading
 import time
@@ -36,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 API = "https://discord.com/api/v9"
+GATEWAY_HOST = "gateway.discord.gg"
 DISCORD_EPOCH = 1420070400000
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) discord/1.0.9174 Chrome/128.0.0.0 "
@@ -89,6 +94,113 @@ def is_compromise_event(my_id, ev) -> bool:
     return False
 
 
+# ---------- gateway (stdlib-only WebSocket, used once to read READY) ----------
+
+def _ws_recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("gateway closed the connection")
+        buf += chunk
+    return buf
+
+
+def _ws_send_text(sock, text):
+    payload = text.encode()
+    header = bytearray([0x81])
+    n = len(payload)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header += struct.pack("!H", n)
+    else:
+        header.append(0x80 | 127)
+        header += struct.pack("!Q", n)
+    mask = os.urandom(4)
+    header += mask
+    sock.sendall(bytes(header) + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+def _ws_recv_message(sock):
+    """Read one complete text message, reassembling fragments."""
+    parts = []
+    while True:
+        b0, b1 = _ws_recv_exact(sock, 2)
+        opcode = b0 & 0x0F
+        n = b1 & 0x7F
+        if n == 126:
+            n = struct.unpack("!H", _ws_recv_exact(sock, 2))[0]
+        elif n == 127:
+            n = struct.unpack("!Q", _ws_recv_exact(sock, 8))[0]
+        if b1 & 0x80:
+            mask = _ws_recv_exact(sock, 4)
+            data = bytes(b ^ mask[i % 4]
+                         for i, b in enumerate(_ws_recv_exact(sock, n)))
+        else:
+            data = _ws_recv_exact(sock, n)
+        if opcode == 0x8:
+            code = struct.unpack("!H", data[:2])[0] if len(data) >= 2 else None
+            raise ConnectionError(f"gateway closed (code {code})")
+        if opcode in (0x9, 0xA):
+            continue
+        parts.append(data)
+        if b0 & 0x80:
+            return b"".join(parts).decode("utf-8")
+
+
+def fetch_gateway_ready(token, timeout=45):
+    """Identify on the gateway and return the READY payload.
+
+    READY is the only place Discord lists ignored non-friends: they are
+    type=0 relationships with user_ignored=true, and the REST
+    /users/@me/relationships endpoint omits them entirely."""
+    ctx = ssl.create_default_context()
+    raw = socket.create_connection((GATEWAY_HOST, 443), timeout=timeout)
+    sock = ctx.wrap_socket(raw, server_hostname=GATEWAY_HOST)
+    try:
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall((
+            "GET /?v=9&encoding=json HTTP/1.1\r\n"
+            f"Host: {GATEWAY_HOST}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            f"User-Agent: {UA}\r\n\r\n").encode())
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("gateway handshake failed")
+            resp += chunk
+        if b" 101 " not in resp.split(b"\r\n", 1)[0]:
+            raise ConnectionError("gateway refused the WebSocket upgrade")
+        json.loads(_ws_recv_message(sock))  # HELLO
+        _ws_send_text(sock, json.dumps({"op": 2, "d": {
+            "token": token,
+            "capabilities": 16381,
+            "properties": {"os": "Windows", "browser": "Discord Client",
+                           "device": "", "release_channel": "stable"},
+            "presence": {"status": "invisible", "since": 0,
+                         "activities": [], "afk": False},
+            "compress": False,
+        }}))
+        for _ in range(100):
+            msg = json.loads(_ws_recv_message(sock))
+            if msg.get("t") == "READY":
+                return msg["d"]
+            if msg.get("op") == 9:
+                raise ConnectionError("gateway rejected the token")
+        raise ConnectionError("no READY from gateway")
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
 # ---------- API ----------
 
 class StopRequested(Exception):
@@ -113,6 +225,7 @@ class Cleanup:
         self.stop_event = stop_event
         self.audit = []
         self.aborted = False
+        self._hidden_ignored = None
 
     def log(self, line):
         self.progress(("log", line))
@@ -176,6 +289,31 @@ class Cleanup:
                 continue
         return None, None
 
+    def hidden_ignored(self):
+        """[(username, uid)] for every ignored account, via gateway READY.
+
+        Cached for the run. Returns [] if the gateway is unreachable, so
+        the REST-based passes still run."""
+        if self._hidden_ignored is not None:
+            return self._hidden_ignored
+        self._check_stop()
+        try:
+            ready = fetch_gateway_ready(self.token)
+        except Exception as e:
+            self.log(f"  (couldn't read ignored list from gateway: {e}; "
+                     f"ignored non-friends may be missed)")
+            self._hidden_ignored = []
+            return self._hidden_ignored
+        names = {u["id"]: u.get("username", "?") for u in ready.get("users", [])}
+        out = []
+        for r in ready.get("relationships", []):
+            if r.get("user_ignored"):
+                uid = r.get("user_id") or r.get("id")
+                out.append((names.get(uid, "?"), uid))
+        self.log(f"Ignored accounts per gateway: {len(out)}")
+        self._hidden_ignored = out
+        return out
+
     # ---------- phases ----------
 
     def auth(self):
@@ -210,8 +348,10 @@ class Cleanup:
                     if r.get("id"):
                         dm_targets[r["id"]] = (
                             r.get("username", "?"), c["id"])
-        # Add friends we don't have a channel for yet (POST-opens them)
-        for uname, uid in friend_uids:
+        # Add friends and ignored non-friends we don't have an open
+        # channel for (POST-opens them). Ignored users' DMs are usually
+        # closed, so they never show up in /users/@me/channels.
+        for uname, uid in friend_uids + self.hidden_ignored():
             if uid not in dm_targets:
                 dm_targets[uid] = (uname, None)
         self.log(f"Friends: {len(friend_uids)}  "
@@ -438,12 +578,12 @@ class Cleanup:
     def cleanup_relationships(self):
         """Unblock, cancel outgoing friend requests, unignore.
 
-        Important: non-friends can be ignored too (via Discord's "Ignore
-        messages" per-DM toggle). The relationships endpoint only knows
-        about friends/blocks/requests, so non-friend ignores are
-        invisible via that path. We fix this by also iterating every DM
-        channel and blindly calling the unignore endpoint on each
-        recipient — Discord returns 204 on no-ops. Idempotent and safe.
+        Important: non-friends can be ignored too. They are type=0
+        relationships with user_ignored=true, which REST
+        /users/@me/relationships omits; only gateway READY lists them,
+        so we pull that list via hidden_ignored(). We also blindly call
+        the unignore endpoint on every open-DM recipient as a backstop;
+        Discord returns 204 on no-ops.
         """
         self.phase("relationships", 90)
         code, rels = self.api("GET", "/users/@me/relationships")
@@ -456,6 +596,11 @@ class Cleanup:
         # friend-ignores (surfaced on relationship object)
         friend_ignored = [(r["user"]["username"], r["user"]["id"])
                           for r in rels if r.get("user_ignored")]
+        seen = {uid for _, uid in friend_ignored}
+        for uname, uid in self.hidden_ignored():
+            if uid not in seen:
+                friend_ignored.append((uname, uid))
+                seen.add(uid)
         # all DM recipients (friends AND non-friends; covers DM-level ignore
         # state that doesn't appear on relationships at all).
         code2, chans = self.api("GET", "/users/@me/channels")
@@ -471,7 +616,7 @@ class Cleanup:
                             (r.get("username", "?"), r["id"]))
 
         self.log(f"blocked: {len(blocked)}  outgoing-reqs: {len(outgoing)}")
-        self.log(f"friend-ignored: {len(friend_ignored)}  "
+        self.log(f"ignored (friends + non-friends): {len(friend_ignored)}  "
                  f"non-friend DM recipients to clear: {len(all_dm_recipients)}")
         if not self.go:
             return 0
@@ -479,7 +624,7 @@ class Cleanup:
         for group, action, path_tmpl in [
             (blocked, "unblock", "/users/@me/relationships/{uid}"),
             (outgoing, "cancel_outgoing", "/users/@me/relationships/{uid}"),
-            (friend_ignored, "unignore_friend",
+            (friend_ignored, "unignore",
              "/users/@me/relationships/{uid}/ignore"),
             (all_dm_recipients, "unignore_dm",
              "/users/@me/relationships/{uid}/ignore"),

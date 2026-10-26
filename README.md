@@ -222,9 +222,14 @@ Your real events (D&D night, movie watch) stay.
 **Relationships:**
 - All blocks removed
 - All outgoing friend requests cancelled
-- All friend-ignores cleared
-- `DELETE /users/@me/relationships/{uid}/ignore` on every DM recipient
-  (covers non-friend DM-level ignore, which no REST endpoint surfaces)
+- All ignores cleared, friends **and non-friends**. Ignored non-friends
+  are hidden from Discord's REST relationships endpoint, so the tool
+  reads the full ignored list from the gateway (the same data your
+  app's Settings → Content & Social → Ignored accounts page shows)
+- The DM sweep also opens and checks DMs with every ignored account,
+  since the bot usually spams them and their DMs are often closed
+- `DELETE /users/@me/relationships/{uid}/ignore` on every open-DM
+  recipient as a backstop
 
 ## Troubleshooting
 
